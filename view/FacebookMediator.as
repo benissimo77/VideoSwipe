@@ -1,0 +1,207 @@
+/*
+ Mediator - PureMVC
+ */
+package com.videoswipe.view 
+{
+	import com.videoswipe.controller.AppConstants;
+	import com.videoswipe.model.FacebookGraphProxy;
+	import com.videoswipe.model.NetConnectionProxy;
+	import com.videoswipe.model.PlaylistProxy;
+	import com.videoswipe.model.vo.FacebookVO;
+	import com.videoswipe.model.vo.FriendVO;
+	import com.videoswipe.view.component.FacebookView;
+	import com.videoswipe.view.popup.event.PopupActionEvent;
+	import flash.events.MouseEvent;
+	import flash.external.ExternalInterface;
+	import org.puremvc.as3.interfaces.IMediator;
+	import org.puremvc.as3.interfaces.INotification;
+	import org.puremvc.as3.patterns.mediator.Mediator;
+	import org.puremvc.as3.patterns.observer.Notification;
+	
+	/**
+	 * A Mediator
+	 */
+	public class FacebookMediator extends Mediator implements IMediator {
+	
+		// Cannonical name of the Mediator
+		public static const NAME:String = "FacebookMediator";
+
+		private var _fgp:FacebookGraphProxy;	// cache a copy of the proxy
+
+		public function FacebookMediator(viewComponent:Object) {
+			// pass the viewComponent to the superclass where 
+			// it will be stored in the inherited viewComponent property
+			super(NAME, viewComponent);
+		}
+
+		/**
+		 * Get the Mediator name.
+		 * <P>
+		 * Called by the framework to get the name of this
+		 * mediator. If there is only one instance, we may
+		 * define it in a constant and return it here. If
+		 * there are multiple instances, this method must
+		 * return the unique name of this instance.</P>
+		 * 
+		 * @return String the Mediator name
+		 */
+		override public function getMediatorName():String {
+			return FacebookMediator.NAME;
+		}
+        
+		override public function onRegister():void {
+			trace("FacebookMediator:: onRegister:");
+			facebookView.addEventListener(MouseEvent.CLICK, facebookViewClicked);
+			_fgp = facade.retrieveProxy(FacebookGraphProxy.NAME) as FacebookGraphProxy;
+		}
+
+		/**
+		 * List all notifications this Mediator is interested in.
+		 * <P>
+		 * Automatically called by the framework when the mediator
+		 * is registered with the view.</P>
+		 * 
+		 * @return Array the list of Nofitication names
+		 */
+		override public function listNotificationInterests():Array {
+			return [
+				NetConnectionProxy.CONNECTSUCCESS,
+				NetConnectionProxy.CONNECTIONCLOSED,
+				AppConstants.FACEBOOKONLINESTATUS,
+				AppConstants.FACEBOOKFRIENDS,
+				AppConstants.FACEBOOKFRIENDLISTS,
+				AppConstants.FACEBOOKUSERINFO,
+				AppConstants.FACEBOOKFRIENDSONLINESTATUS,
+				AppConstants.FACEBOOKCOVERINFO
+				];
+		}
+
+		/**
+		 * Handle all notifications this Mediator is interested in.
+		 * 
+		 * Called by the framework when a notification is sent that
+		 * this mediator expressed an interest in when registered
+		 * (see <code>listNotificationInterests</code>.</P>
+		 * 
+		 * @param INotification a notification 
+		 */
+		override public function handleNotification(note:INotification):void {
+			switch (note.getName()) {
+				
+				case NetConnectionProxy.CONNECTSUCCESS:
+				case NetConnectionProxy.CONNECTIONCLOSED:
+					trace("FacebookMediator:: handleNotification: CONNECTSUCCESS / CONNECTIONCLOSED" );
+					var _ncp:NetConnectionProxy = facade.retrieveProxy(NetConnectionProxy.NAME) as NetConnectionProxy;
+					if (note.getName() == NetConnectionProxy.CONNECTSUCCESS) {
+						facebookView.connectionURL = "https://apps.facebook.com/videoswipe/?u=" + _fgp.vo.uid;
+					} else {
+						facebookView.connectionURL = "";
+					}
+					break;
+					
+				case AppConstants.FACEBOOKONLINESTATUS:
+					trace("FacebookMediator:: handleNotification: FACEBOOKONLINESTATUS:", note.getBody() );
+					facebookView.connected = note.getBody() as Boolean;
+					break;
+					
+				case AppConstants.FACEBOOKUSERINFO:
+					trace("FacebookMediator:: handleNotification: FACEBOOKUSERINFO", note.getBody() );
+					facebookView.userinfo =  note.getBody() as FacebookVO;
+					break;
+					
+				case AppConstants.FACEBOOKFRIENDS:
+					trace("FacebookMediator:: handleNotification: FACEBOOKFRIENDS" );
+					//facebookView.onFriends( note.getBody() );
+					break;
+					
+				case AppConstants.FACEBOOKFRIENDLISTS:
+					trace("FacebookMediator:: handleNotification: FACEBOOKFRIENDLISTS:", note.getBody() );
+					facebookView.onFriendlists( note.getBody() );
+					break;
+					
+				case AppConstants.FACEBOOKFRIENDSONLINESTATUS:
+					trace("FacebookMediator:: handleNotification:", note.getBody() );
+					facebookView.friendsOnlineStatus(note.getBody());
+					break;
+				
+				case AppConstants.FACEBOOKCOVERINFO:
+					trace("FacebookMediator:: handleNotification: FACEBOOKCOVERINFO:" );
+					break;
+					
+				default:
+					break;
+			}
+		}
+
+		// facebookViewClicked
+		// general mouse-handling function for the entire facebookView
+		// most of the clicks will be to send/receive data via the Facebook Graph API so it makes sense to handle mouse events
+		// here in the mediator.
+		// The name of the target that generated the click will hold details of the desired action
+		// For events generated by the friendPanel, the "cursor" object holds the relevant FriendVO object to be acted on
+		// FriendCursor has been simplified, icons removed so clicking cursor automatically invites friend OR sends Facebook invite
+		private function facebookViewClicked(e:MouseEvent):void
+		{
+			var _ncp:NetConnectionProxy = facade.retrieveProxy(NetConnectionProxy.NAME) as NetConnectionProxy;
+			var _f:FriendVO = facebookView.cursorVO;
+			trace("FacebookMediator:: facebookViewClicked:", e.target.name);
+
+			switch (e.target.name) {
+				
+				case "connect":
+					sendNotification( AppConstants.LOGCONNECTCLICKED );	// log this event
+					if (facebookView.connected) {
+						// this should never happen, we only present the connect button
+						// when we are not connected...
+					} else _fgp.connect( facebookView.stage );
+					break;
+					
+				case "connectAsGuest":
+					_fgp.connectAsGuest();
+					break;
+
+				case "copy":
+					sendNotification( AppConstants.COPYTOCLIPBOARD, facebookView.connectionURL );
+					facebookView.textCopied();
+					break;
+					
+				case "invite":
+					sendNotification( AppConstants.LOGFRIENDSINVITED );
+					_fgp.requestToUsers();
+					break;
+
+				case "AddFriendLists":
+					trace("FacebookMediator:: facebookViewClicked: ADDLISTBUTTON" );
+					_fgp.addFriendlists( facebookView.stage );
+					break;
+
+				case "friendView":
+					switch (_f.type) {
+
+						case FriendVO.LIST:
+							facebookView.update();
+							break;
+
+						case FriendVO.FRIEND:
+							// either call server to connect immediately, or send a Facebook invite/message
+							if (_f.live) {
+								_ncp.clientInviteFriend( _f );
+							} else if (_f.connected) {
+								_fgp.requestToUsers( _f.uid );
+							} else {
+								_fgp.sendToUsers( _f.uid );
+							}
+							sendNotification( AppConstants.LOGFRIENDINVITED );
+							break;
+					}
+					break;
+			
+			}
+		}
+
+		private function get facebookView():FacebookView
+		{
+			return viewComponent as FacebookView;
+		}
+	}
+}
